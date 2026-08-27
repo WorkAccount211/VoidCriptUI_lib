@@ -1,23 +1,48 @@
 --[[
-	VoidCriptUI Library v1.0
+	VoidCriptUI Library v2.0
 	API: Weave-style (Flags, ConfigurationSaving, KeySystem, Subtabs, Notify)
 	Design: CompKiller-style (dark CS2 menu, left icon rail, accent line, square checkboxes)
+
+	v2.0 adds: boot loading screen with animated "V" logo, warn/error-only
+	console logging, global settings search, window resize/minimize,
+	runtime re-themeable UI with presets + in-UI editor, watermark and
+	keylist modules (with custom user modules), range sliders, keyboard-
+	editable slider values, keybinds with modifiers/mouse buttons,
+	combined toggle+keybind / toggle+colorpicker rows, rainbow color mode,
+	progress bar / image / table elements, config manager, DependsOn
+	conditional visibility, input validation, throttled sliders,
+	pcall-guarded callbacks, a centralized connection Maid, custom
+	in-menu cursor with optional game-input lock, mobile touch support,
+	and an idempotent getgenv() re-load guard.
 ]]
 
-local UserInputService = game:GetService("UserInputService")
-local TweenService     = game:GetService("TweenService")
-local HttpService      = game:GetService("HttpService")
-local RunService       = game:GetService("RunService")
-local Players          = game:GetService("Players")
+local UserInputService   = game:GetService("UserInputService")
+local TweenService       = game:GetService("TweenService")
+local HttpService        = game:GetService("HttpService")
+local RunService         = game:GetService("RunService")
+local Players            = game:GetService("Players")
+local GuiService         = game:GetService("GuiService")
+local ContextActionService = game:GetService("ContextActionService")
 
 local LocalPlayer = Players.LocalPlayer
 
+-- Idempotent re-load guard: if a previous copy of VoidCript is already
+-- running (e.g. the script was executed twice), unload it cleanly first
+-- so GUIs, connections and hooked game input don't stack up.
+if type(getgenv) == "function" then
+	local existing = getgenv().VoidCript
+	if existing and type(existing.Unload) == "function" then
+		pcall(function() existing:Unload() end)
+	end
+end
+
 local Library = {
 	Flags   = {},
-	Version = "1.1.0",
+	Version = "2.0.0",
 	_saveDebounce = nil,
 	_listeners = {},
 	_guis = {},
+	_windows = {},
 }
 Library.__index = Library
 
@@ -36,6 +61,47 @@ local Theme = {
 	Text        = Color3.fromRGB(230, 230, 235),
 	TextDim     = Color3.fromRGB(130, 130, 140),
 	TextDark    = Color3.fromRGB(90, 90, 100),
+
+	-- typography (roadmap #29 — override via SetTheme to swap fonts)
+	Font        = Enum.Font.Gotham,
+	FontMedium  = Enum.Font.GothamMedium,
+	FontBold    = Enum.Font.GothamBold,
+}
+
+-- Built-in theme presets (roadmap #27). Apply with Library:SetThemePreset(name).
+local ThemePresets = {
+	Midnight = {
+		Accent = Color3.fromRGB(199, 62, 110), AccentDark = Color3.fromRGB(140, 40, 78),
+		Background = Color3.fromRGB(12, 12, 14), Sidebar = Color3.fromRGB(9, 9, 11),
+		Header = Color3.fromRGB(15, 15, 17), Section = Color3.fromRGB(16, 16, 18),
+		Element = Color3.fromRGB(24, 24, 27), ElementHover = Color3.fromRGB(32, 32, 36),
+		Outline = Color3.fromRGB(38, 38, 42), OutlineSoft = Color3.fromRGB(28, 28, 32),
+		Text = Color3.fromRGB(230, 230, 235), TextDim = Color3.fromRGB(130, 130, 140), TextDark = Color3.fromRGB(90, 90, 100),
+	},
+	Blood = {
+		Accent = Color3.fromRGB(214, 48, 49), AccentDark = Color3.fromRGB(140, 28, 30),
+		Background = Color3.fromRGB(14, 10, 10), Sidebar = Color3.fromRGB(10, 7, 7),
+		Header = Color3.fromRGB(17, 12, 12), Section = Color3.fromRGB(18, 13, 13),
+		Element = Color3.fromRGB(27, 19, 19), ElementHover = Color3.fromRGB(36, 25, 25),
+		Outline = Color3.fromRGB(45, 30, 30), OutlineSoft = Color3.fromRGB(32, 22, 22),
+		Text = Color3.fromRGB(235, 228, 228), TextDim = Color3.fromRGB(150, 130, 130), TextDark = Color3.fromRGB(100, 85, 85),
+	},
+	Ocean = {
+		Accent = Color3.fromRGB(56, 152, 219), AccentDark = Color3.fromRGB(34, 101, 148),
+		Background = Color3.fromRGB(10, 13, 16), Sidebar = Color3.fromRGB(8, 10, 13),
+		Header = Color3.fromRGB(12, 16, 20), Section = Color3.fromRGB(14, 18, 22),
+		Element = Color3.fromRGB(21, 27, 33), ElementHover = Color3.fromRGB(28, 36, 44),
+		Outline = Color3.fromRGB(36, 46, 55), OutlineSoft = Color3.fromRGB(26, 34, 41),
+		Text = Color3.fromRGB(228, 235, 240), TextDim = Color3.fromRGB(125, 140, 150), TextDark = Color3.fromRGB(85, 98, 108),
+	},
+	Mono = {
+		Accent = Color3.fromRGB(220, 220, 225), AccentDark = Color3.fromRGB(160, 160, 165),
+		Background = Color3.fromRGB(13, 13, 13), Sidebar = Color3.fromRGB(10, 10, 10),
+		Header = Color3.fromRGB(16, 16, 16), Section = Color3.fromRGB(17, 17, 17),
+		Element = Color3.fromRGB(25, 25, 25), ElementHover = Color3.fromRGB(33, 33, 33),
+		Outline = Color3.fromRGB(40, 40, 40), OutlineSoft = Color3.fromRGB(29, 29, 29),
+		Text = Color3.fromRGB(230, 230, 230), TextDim = Color3.fromRGB(135, 135, 135), TextDark = Color3.fromRGB(92, 92, 92),
+	},
 }
 
 -- glyph icons (CompKiller-style minimal rail)
@@ -52,6 +118,10 @@ local Icons = {
 	user      = "☺",
 	shield    = "⛨",
 	star      = "★",
+	search    = "🔍",
+	list      = "☰",
+	image     = "🖼",
+	table     = "▤",
 }
 
 -- ══════════════════════════════ PUBLIC UTILITIES ══════════════════════════════
