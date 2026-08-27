@@ -40,7 +40,7 @@
 ## Установка
 
 ```lua
-local VoidCript = loadstring(game:HttpGet("https://github.com/WorkAccount211/VoidCriptUI_lib/raw/refs/heads/main/VoidCriptUI.lua"))()
+local VoidCript = loadstring(game:HttpGet("https://raw.githubusercontent.com/WorkAccount211/VoidCriptUI_lib/refs/heads/main/VoidCriptUI.lua"))()
 ```
 
 Или локально в Studio:
